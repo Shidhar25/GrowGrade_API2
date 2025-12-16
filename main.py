@@ -5,6 +5,10 @@ from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
+# Import Gemini Chat Model
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage
+
 from pdf_processor import extract_pages_text, chunk_document
 from rag_engine import index_pdf_chunks, retrieve
 from quiz_generator import generate_quiz_from_text
@@ -19,11 +23,15 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @app.get("/")
 def home():
-    return {"message": "RAG + Quiz Service Running"}
+    return {"message": "RAG + Quiz Service Running (Gemini Powered)"}
 
 
 @app.post("/upload-and-index")
-async def upload_and_index(file: UploadFile = File(...)):
+async def upload_and_index(
+    file: UploadFile = File(...),
+    num_questions: int = Form(10),
+    difficulty: str = Form("Medium")
+):
     """
     Upload PDF, chunk, index into ChromaDB, and generate a 10-question quiz for the whole PDF.
     Returns: {pdf_id, chunk_count, quiz}
@@ -47,9 +55,25 @@ async def upload_and_index(file: UploadFile = File(...)):
     # generate full-document quiz (non-RAG)
     # use concatenated text or the largest chunk as source; prefer whole text but keep limit
     whole_text = "\n".join([c["text"] for c in chunks])
-    quiz = generate_quiz_from_text(whole_text)
+    quiz = generate_quiz_from_text(whole_text, num_questions=num_questions, difficulty=difficulty)
 
     return {"pdf_id": pdf_id, "filename": filename, "chunks_indexed": chunk_count, "quiz": quiz}
+
+
+@app.post("/submit-quiz")
+async def submit_quiz(
+    pdf_id: str = Form(...),
+    score: int = Form(...),
+    time_taken_seconds: float = Form(...)
+):
+    """
+    Log user quiz performance.
+    In a real app, save this to a database.
+    """
+    # Simulating database save
+    print(f"📈 QUIZ SUBMISSION: PDF={pdf_id}, Score={score}, Time={time_taken_seconds}s")
+    
+    return {"message": "Quiz submission recorded", "score": score, "time_taken": time_taken_seconds}
 
 
 @app.post("/ask")
@@ -68,12 +92,12 @@ async def ask(query: str = Form(...), pdf_id: str = Form(None)):
     # assemble context
     context_text = "\n\n".join([f"Pages {r['metadata'].get('start_page')}-{r['metadata'].get('end_page')}: {r['text']}" for r in results])
 
-    # call a simple LLM prompt (reuse quiz_generator's LLM? Could add QA-specific LLM)
-    from langchain_core.messages import HumanMessage
-    from langchain_openai import ChatOpenAI
-    llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "google/gemma-2-27b-it"),
-                     base_url=os.getenv("OPENAI_BASE_URL"),
-                     temperature=0.2)
+    # Instantiate Gemini LLM for the QA task
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-flash-latest",
+        google_api_key=os.getenv("GEMINI_API_KEY"),
+        temperature=0.2
+    )
 
     prompt = f"""
 You are an assistant that must answer the question using ONLY the provided CONTEXT. If the answer is not contained, say "I don't know from the provided document."

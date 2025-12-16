@@ -2,29 +2,26 @@
 import os
 import json
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# FIX: Ensure OpenAI API key env variable is set (ChatOpenAI requires this)
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENROUTER_API_KEY")  # IMPORTANT
-os.environ["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
-
-
-# Configure LLM (OpenRouter)
+# Configure LLM (Gemini)
 def get_llm():
-    return ChatOpenAI(
-        model="google/gemma-2-27b-it",
-        api_key=os.getenv("OPENROUTER_API_KEY"),     # REQUIRED
-        base_url="https://openrouter.ai/api/v1",     # REQUIRED
+    if not os.getenv("GEMINI_API_KEY"):
+        raise ValueError("GEMINI_API_KEY is missing from .env file")
+        
+    return ChatGoogleGenerativeAI(
+        model="gemini-flash-latest",
+        google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.2,
     )
 
 llm = get_llm()
 
 
-def generate_quiz_from_text(text, num_questions=10):
+def generate_quiz_from_text(text, num_questions=10, difficulty="Medium"):
     """
     Force the LLM to return strict JSON array of MCQs.
     Each MCQ: {question, options[4], correct_answer (A/B/C/D)}
@@ -33,6 +30,8 @@ def generate_quiz_from_text(text, num_questions=10):
 You are a professional quiz generator.
 
 Given the CONTENT below, generate EXACTLY {num_questions} multiple-choice questions.
+Difficulty Level: {difficulty}
+
 Return ONLY a JSON array (no surrounding text, no Markdown):
 
 [

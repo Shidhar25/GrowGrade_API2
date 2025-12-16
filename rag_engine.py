@@ -1,16 +1,26 @@
 # rag_engine.py
+import os
+import time
 from chromadb import PersistentClient
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from dotenv import load_dotenv
+
+load_dotenv()
 
 client = PersistentClient(path="embeddings_store")
 
 collection = client.get_or_create_collection(
-    name="pdf_chunks",
+    name="pdf_chunks_gemini",  # New collection for new model dimensions
     metadata={"hnsw:space": "cosine"}
 )
 
-embedding_model = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
+# Replace HuggingFace with Gemini Embeddings
+if not os.getenv("GEMINI_API_KEY"):
+    raise ValueError("GEMINI_API_KEY is missing from .env file")
+
+embedding_model = GoogleGenerativeAIEmbeddings(
+    model="models/text-embedding-004",  # Upgraded model
+    google_api_key=os.getenv("GEMINI_API_KEY")
 )
 
 
@@ -31,7 +41,28 @@ def index_pdf_chunks(pdf_id, chunks):
             "end_page": safe_int(c["end_page"]),
         })
 
-    embeddings = embedding_model.embed_documents(texts)
+    # --- FIX FOR 429 ERRORS: BATCHING & RATE LIMITING ---
+    embeddings = []
+    batch_size = 5  # Reduced batch size for Free Tier stability
+    
+    print(f"Starting embedding for {len(texts)} chunks...")
+    
+    for i in range(0, len(texts), batch_size):
+        batch_texts = texts[i : i + batch_size]
+        print(f"Embedding batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
+        
+        try:
+            # Embed the current batch
+            batch_embeddings = embedding_model.embed_documents(batch_texts)
+            embeddings.extend(batch_embeddings)
+            
+            # Rate Limit Protection: Sleep between batches
+            # 2.0 seconds delay to stay well under RPM limits
+            time.sleep(2.0) 
+            
+        except Exception as e:
+            print(f"Error embedding batch starting at index {i}: {e}")
+            raise e
 
     collection.add(
         ids=ids,
@@ -44,6 +75,7 @@ def index_pdf_chunks(pdf_id, chunks):
 
 
 def retrieve(query, top_k=5):
+    # Generate query embedding using Gemini
     query_emb = embedding_model.embed_query(query)
 
     results = collection.query(

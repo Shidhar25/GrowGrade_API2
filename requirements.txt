@@ -4,7 +4,6 @@ python-multipart
 pdfplumber
 python-dotenv
 chromadb
-langchain-huggingface
-langchain-openai
 langchain-text-splitters
-sentence-transformers
+langchain-google-genai
+google-generativeai
